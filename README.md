@@ -277,6 +277,12 @@ python scripts/render_xmind.py \
 
 发布前请先查看：`RELEASE_CHECKLIST.md`
 
+建议一并维护这些发布相关文件：
+
+- `LICENSE`
+- `THIRD_PARTY_NOTICES.md`
+- `GITHUB_RELEASE_TEMPLATE.md`
+
 ## 安全与隐私
 
 请不要把以下内容提交到 GitHub：
@@ -352,6 +358,17 @@ npm install
 - 更稳定的章节标题抽取
 - 更清晰的 OpenClaw 安装说明
 
+## 致谢
+
+这个项目的完整工作流建立在几个已有 skill / 工具之上，感谢它们提供的能力基础与启发：
+
+- `bilibili-cli`：提供 Bilibili 登录、详情抓取、字幕、评论和音频提取能力
+- `aliyun-asr`：提供云端音频文件转写能力，尤其适合 Windows 场景
+- `parakeet-local-asr`：提供本地 ASR 能力，适合 Linux / macOS 优先使用
+- `xmind-generator`：提供 `.xmind` 文件导出能力
+
+`bili-mindmap` 的定位不是替代这些项目，而是把它们编排成一个可实际运行的 Bilibili 视频知识梳理工作流。
+
 ## 说明
 
-如果这个仓库中包含来自其他技能或项目的目录，请在正式公开发布前，补充它们的原始来源、修改说明以及许可证信息。
+如果这个仓库中包含来自其他技能或项目的目录，请在正式公开发布前，补充它们的原始来源、修改说明以及许可证信息。详见：`THIRD_PARTY_NOTICES.md`
