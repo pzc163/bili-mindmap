@@ -1,0 +1,65 @@
+# Generated pipeline outputs
+output/
+
+# Local sample/debug artifacts
+tmp-outline-sample/
+tmp-outline-sample2/
+tmp/
+temp/
+
+# Generated mind maps and outlines
+*.xmind
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+
+# Local environment files
+.env
+.env.*
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Node dependencies
+node_modules/
+
+# Editor / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local credentials and secrets
+credential.json
+credentials.json
+*credential*.json
+*secret*.json
+*token*.json
+*.pem
+*.key
+
+# Local tool config copies
+aliyun-asr-config.json
+.openclaw/
+.bilibili-cli/
+
+# Downloaded / generated media
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.ogg
+*.opus
+*.flac
+*.zip
+
+# Local repo metadata backups
+.repo-backups/
