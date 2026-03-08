@@ -1,6 +1,14 @@
 ---
 name: bili-mindmap
 description: Turn a Bilibili video link or BV number into a summarized XMind mind map for OpenClaw. Use when the user provides a Bilibili URL/BV and wants a summary, transcript-based outline, structured notes, 内容梳理, or 思维导图. The skill checks `bili` login state, guides QR login when needed, collects video details, subtitles, AI summary, and hot comments with `bilibili-cli`, falls back to audio extraction plus local OpenAI-compatible ASR when subtitles are unavailable, and exports a `.xmind` file.
+homepage: https://github.com/pzc163/bili-mindmap
+metadata:
+  clawdbot:
+    emoji: "🧠"
+    files:
+      - "scripts/*"
+      - "references/*"
+      - "agents/*"
 ---
 
 # Bili Mindmap
