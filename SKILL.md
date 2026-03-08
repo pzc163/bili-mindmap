@@ -5,10 +5,6 @@ homepage: https://github.com/pzc163/bili-mindmap
 metadata:
   clawdbot:
     emoji: "🧠"
-    files:
-      - "scripts/*"
-      - "references/*"
-      - "agents/*"
 ---
 
 # Bili Mindmap
