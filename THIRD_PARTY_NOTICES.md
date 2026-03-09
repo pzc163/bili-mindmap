@@ -1,44 +1,34 @@
 # Third-Party Notices
 
-This repository is organized as a workspace / monorepo. It contains original `bili-mindmap` orchestration files together with companion skills or local copies of upstream projects.
+This directory is a publishable single-skill package derived from the broader `bili-mindmap` development workspace.
 
-## Scope
+## Included / Referenced Components
 
-- Top-level orchestration files such as `README.md`, `SKILL.md`, `agents/`, `references/`, and `scripts/` are the `bili-mindmap` project itself.
-- Some subdirectories may come from upstream projects, or may be adapted local copies used for integration and testing.
+### `bilibili-cli`
 
-## Included Components
+- Role: external command-line dependency used for login, metadata retrieval, subtitles, comments, and audio extraction
+- Packaging status: not bundled as a source directory in this publish package
+- Expected usage: installed separately on the target machine and exposed as the `bili` command
 
-### `bilibili-cli/`
+### `vendor/aliyun_asr/`
 
-- Role: Bilibili login, metadata retrieval, subtitles, comments, audio extraction
-- Local status: bundled as a source directory inside this workspace
-- License status: contains `bilibili-cli/LICENSE`
-- Observed license: Apache License 2.0
+- Role: bundled cloud-based file transcription fallback implementation
+- Origin: adapted from the local `aliyun-asr` companion skill used in the development workspace
+- Packaging status: bundled in this publish package as vendored implementation files
 
-### `aliyun-asr/`
+### `parakeet-local-asr`
 
-- Role: cloud-based audio file transcription fallback, especially for Windows
-- Local status: bundled as a source directory inside this workspace
-- License status: no separate top-level `LICENSE` file found in the current bundled snapshot
-- Recommendation: verify upstream repository ownership and intended license before wider redistribution or commercial use
+- Role: optional external local ASR service for Linux / macOS
+- Packaging status: not bundled as a source directory in this publish package
+- Expected usage: started separately and exposed via an OpenAI-compatible transcription endpoint
 
-### `parakeet-local-asr/`
+### `xmind-generator`
 
-- Role: local ASR workflow for Linux / macOS
-- Local status: bundled as a source directory inside this workspace
-- License status: no separate top-level `LICENSE` file found in the current bundled snapshot
-- Recommendation: verify upstream repository ownership and intended license before wider redistribution or commercial use
-
-### `xmind-generator/`
-
-- Role: export Markdown outline to `.xmind`
-- Local status: bundled as a source directory inside this workspace
-- License status: no separate top-level `LICENSE` file found in the current bundled snapshot
-- Recommendation: verify upstream repository ownership and intended license before wider redistribution or commercial use
+- Role in development workspace: XMind export support
+- Packaging status: not bundled as a source directory in this publish package
+- Note: this publish package uses its own pure Python `.xmind` writer instead of depending on the original `xmind-generator` directory
 
 ## Publication Notes
 
-- If you continue to publish this repository publicly, keep this file updated when companion components change.
-- If you later split the repository into multiple standalone projects, add a dedicated `LICENSE` to each independently maintained project.
-- If any bundled component has an upstream `NOTICE`, attribution requirement, or trademark restriction, preserve it in future releases.
+- Review upstream licenses and attribution requirements before wider redistribution or commercial use.
+- Keep this file updated if bundled vendor code changes.

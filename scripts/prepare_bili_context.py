@@ -478,7 +478,7 @@ def main() -> int:
     ensure_tool("bili")
     current_os = detect_os()
     root_dir = Path(__file__).resolve().parents[1]
-    aliyun_entrypoint = root_dir / "aliyun-asr" / "main.py"
+    aliyun_entrypoint = root_dir / "vendor" / "aliyun_asr" / "main.py"
     provider_order = choose_asr_providers(args.asr_provider, current_os)
 
     output_dir = make_output_dir(args.source, args.output)

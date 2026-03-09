@@ -1,6 +1,6 @@
-This license applies to the original `bili-mindmap` orchestration files in the repository root and the `agents/`, `references/`, and `scripts/` directories, unless a file or subdirectory states otherwise.
+This license applies to the original `bili-mindmap` single-skill package files in this directory, including `SKILL.md`, `README.md`, `agents/`, `references/`, and `scripts/`, unless a file or subdirectory states otherwise.
 
-Third-party or companion components bundled in subdirectories such as `bilibili-cli/`, `aliyun-asr/`, `parakeet-local-asr/`, and `xmind-generator/` may be subject to their own licenses, notices, or upstream usage restrictions. See `THIRD_PARTY_NOTICES.md` for details.
+Bundled or adapted third-party components, such as files under `vendor/`, may be subject to their own licenses, notices, or upstream usage restrictions. See `THIRD_PARTY_NOTICES.md` for details.
 
 Apache License
 Version 2.0, January 2004
