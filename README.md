@@ -92,23 +92,6 @@ python scripts/render_xmind.py \
   --output output/BV1ABcsztEcY/result.xmind
 ```
 
-## ClawHub 发布
-
-从这个目录本身执行发布，而不是从整个 workspace 仓库根目录发布：
-
-```bash
-clawhub publish . --version 0.1.0 --registry "https://www.clawhub.ai/"
-```
-
-## 已移除的工作区耦合
-
-为了变成单 skill 包，这个发布目录已经做了以下收敛：
-
-- 不再依赖 `xmind-generator/`，改为纯 Python 导出 `.xmind`
-- 不再依赖外部 `aliyun-asr/` 目录，改为内置 `vendor/aliyun_asr/`
-- 不再要求把 `parakeet-local-asr/`、`bilibili-cli/`、`xmind-generator/` 这些 companion skills 一起发布
-- 仍然允许使用系统里已安装的 `bili` 命令和本地 Parakeet 服务
-
 ## 致谢
 
 这个 skill 的工作流与实现思路受以下项目启发或复用部分能力：
