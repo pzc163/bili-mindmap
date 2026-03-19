@@ -16,6 +16,22 @@ import uuid
 from pathlib import Path
 from urllib import error, request
 
+# Moonshine ASR integration
+sys.path.append(str(Path(__file__).resolve().parents[1] / "vendor"))
+from moonshine_asr.moonshine_asr_provider import MoonshineASR
+
+_moonshine_asr_instance: Optional[MoonshineASR] = None
+
+def get_moonshine_asr() -> MoonshineASR:
+    global _moonshine_asr_instance
+    if _moonshine_asr_instance is None:
+        _moonshine_asr_instance = MoonshineASR() # Language can be made configurable later
+    return _moonshine_asr_instance
+
+def transcribe_file_moonshine(audio_file: Path) -> str:
+    asr = get_moonshine_asr()
+    return asr.speech_to_text(str(audio_file))
+
 
 BV_PATTERN = re.compile(r"(BV[0-9A-Za-z]+)", re.IGNORECASE)
 EMPTY_HINTS = (
@@ -117,11 +133,8 @@ def detect_os() -> str:
 def choose_asr_providers(requested: str, current_os: str) -> list[str]:
     if requested != "auto":
         return [requested]
-    if current_os == "windows":
-        return ["aliyun"]
-    if current_os in {"linux", "macos"}:
-        return ["parakeet", "aliyun"]
-    return ["aliyun"]
+    # Prioritize moonshine for all platforms
+    return ["moonshine", "parakeet", "aliyun"]
 
 
 def make_output_dir(source: str, output: str | None) -> Path:
@@ -364,6 +377,8 @@ def fallback_to_asr(
                     transcript = transcribe_file_parakeet(audio_file, url=parakeet_url, model=parakeet_model)
                 elif provider == "aliyun":
                     transcript = transcribe_file_aliyun(audio_file, entrypoint=aliyun_entrypoint)
+                elif provider == "moonshine":
+                    transcript = transcribe_file_moonshine(audio_file)
                 else:
                     raise RuntimeError(f"Unsupported ASR provider: {provider}")
 
