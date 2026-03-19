@@ -2,6 +2,7 @@
 name: bili-mindmap
 description: Turn a Bilibili video URL or BV number into a summarized XMind mind map. Use when the user wants to collect subtitles, comments, AI summary, and transcript fallback, then generate structured notes, 内容梳理, or 思维导图 for a Bilibili video.
 metadata:
+  version: 0.2.0
   clawdbot:
     emoji: "🧠"
 ---
