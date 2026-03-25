@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 import uuid
 import zipfile
 from pathlib import Path
@@ -94,6 +95,13 @@ def build_xmind_json(root_title: str, branches: list[dict]) -> list[dict]:
     ]
 
 
+def format_for_console(value: str) -> str:
+    encoding = (getattr(sys.stdout, "encoding", None) or "").lower()
+    if "utf" in encoding:
+        return value
+    return value.encode("unicode_escape").decode("ascii")
+
+
 def write_xmind(output: Path, content: list[dict]) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     metadata = {}
@@ -118,8 +126,8 @@ def main() -> int:
     raw = outline.read_text(encoding="utf-8", errors="replace")
     root_title, branches = parse_outline(raw)
     write_xmind(output, build_xmind_json(root_title, branches))
-    print(f"✅ XMind file saved: {output}")
-    print(f'   Root: "{root_title}"')
+    print(f"XMind file saved: {format_for_console(str(output))}")
+    print(f'   Root: "{format_for_console(root_title)}"')
     print(f"   Branches: {len(branches)}")
     return 0
 

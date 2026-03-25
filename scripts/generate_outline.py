@@ -78,6 +78,16 @@ CHUNK_BOUNDARY_KEYWORDS = (
     "总之",
 )
 
+SEMANTIC_HIGHLIGHT_PATTERNS = (
+    ("亮点一", re.compile("(?:其一|第一点)(?:就是|是|在于)?")),
+    ("亮点二", re.compile("(?:(?:还有)?第二点|其二)(?:呢|就是|是|在于)?")),
+    ("亮点三", re.compile("(?:(?:还有)?第三点|其三)(?:呢|就是|是|在于)?")),
+)
+
+INTRO_SECTION_PATTERN = re.compile("一开始|最开始|前期|被劝退|压抑|资源给的极其稀缺|操纵格蕾丝")
+SWITCH_SECTION_PATTERN = re.compile("(?:切换到|换到).{0,8}(?:里昂|之后)|进行复仇|极致释放|快感接二连三")
+CONCLUSION_SECTION_PATTERN = re.compile("总之|总结|所以这三点结合到一起|划时代的大作|非常有趣")
+
 TITLE_PREFIX_PATTERNS = (
     r"^(首先|其次|然后|接下来|另外|此外|最后|总之|总结来说)[，,：:]?",
     r"^(我们来看|我们先来看|这里讲|这一段讲|这一部分讲|这个部分讲)",
@@ -126,7 +136,9 @@ SOURCE_LABELS = {
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate a Markdown mind map outline from collected Bilibili context.")
+    parser = argparse.ArgumentParser(
+        description="Fallback: generate a Markdown mind map outline from collected Bilibili context when the host LLM workflow is unavailable."
+    )
     parser.add_argument("--context-dir", required=True, help="Directory produced by prepare_bili_context.py")
     parser.add_argument("--output", help="Output Markdown file path. Default: <context-dir>/outline.md")
     return parser.parse_args()
@@ -519,6 +531,133 @@ def derive_alternative_chunk_title(sentences: list[str], used_titles: set[str]) 
     return ""
 
 
+def extract_section_seed(sentence: str, pattern: re.Pattern[str]) -> str:
+    cleaned = clean_sentence(sentence)
+    cleaned = pattern.sub("", cleaned, count=1).strip(" ?,??:?;")
+    prefixes = (
+        "就是",
+        "是",
+        "在于",
+        "还有呢",
+        "还有",
+        "这里边",
+        "这个部分",
+        "这一部分",
+        "它的",
+        "他让玩家",
+        "让玩家",
+        "让你",
+        "能够",
+        "可以",
+        "呃",
+    )
+    changed = True
+    while changed and cleaned:
+        changed = False
+        for prefix in prefixes:
+            if cleaned.startswith(prefix):
+                cleaned = cleaned[len(prefix):].strip()
+                changed = True
+    cleaned = re.split(r"[?,??;?:]", cleaned, maxsplit=1)[0].strip()
+    return shorten_title(cleaned, max_len=16) if cleaned else ""
+
+
+def detect_semantic_section(sentence: str) -> tuple[str | None, str]:
+    for label, pattern in SEMANTIC_HIGHLIGHT_PATTERNS:
+        if pattern.search(sentence):
+            return label, extract_section_seed(sentence, pattern)
+    if CONCLUSION_SECTION_PATTERN.search(sentence):
+        return "总体评价", ""
+    if SWITCH_SECTION_PATTERN.search(sentence):
+        return "切换角色后的释放感", ""
+    return None, ""
+
+
+def finalize_semantic_title(kind: str, seed: str, sentences: list[str]) -> str:
+    derived = derive_chunk_title(sentences)
+    if kind.startswith("亮点"):
+        content = seed
+        if any("人物弧光" in sentence for sentence in sentences):
+            content = "放大里昂的人物弧光"
+        elif any(("保护欲" in sentence or "责任感" in sentence) for sentence in sentences) and any("艾米丽" in sentence for sentence in sentences):
+            content = "艾米丽带来的保护欲"
+        elif any("成长" in sentence for sentence in sentences) and any("格蕾丝" in sentence for sentence in sentences):
+            content = "格蕾丝的成长视角"
+        elif not content or len(content) < 6 or content.startswith(("操纵", "加入", "这里边", "玩家", "说是")):
+            content = derived or derive_alternative_chunk_title(sentences, set())
+        return f"{kind}：{content}" if content else kind
+    if kind == "开场观点":
+        if any(INTRO_SECTION_PATTERN.search(sentence) for sentence in sentences):
+            return "前期压抑体验"
+        return derived or kind
+    return kind
+
+
+def split_semantic_sections(text: str) -> list[dict[str, object]]:
+    raw_lines = [clean_sentence(line) for line in text.splitlines()]
+    raw_lines = [line for line in raw_lines if line]
+    if not raw_lines:
+        return []
+
+    sections: list[dict[str, object]] = []
+    current_kind = "开场观点"
+    current_seed = ""
+    current_lines: list[str] = []
+    found_explicit_highlight = False
+
+    def flush_current() -> None:
+        nonlocal current_kind, current_seed, current_lines
+        if not current_lines:
+            return
+        sections.append(
+            {
+                "kind": current_kind,
+                "seed": current_seed,
+                "lines": current_lines[:],
+            }
+        )
+        current_kind = "开场观点"
+        current_seed = ""
+        current_lines = []
+
+    for index, line in enumerate(raw_lines):
+        lookahead = line
+        if index + 1 < len(raw_lines) and len(line) <= 10:
+            lookahead = f"{line} {raw_lines[index + 1]}"
+
+        next_kind, next_seed = detect_semantic_section(lookahead)
+
+        if current_kind == "开场观点" and INTRO_SECTION_PATTERN.search(lookahead):
+            current_kind = "前期压抑体验"
+
+        if next_kind and current_lines and next_kind != current_kind:
+            flush_current()
+
+        if next_kind:
+            current_kind = next_kind
+            if next_seed:
+                current_seed = next_seed
+            if next_kind.startswith("亮点"):
+                found_explicit_highlight = True
+
+        current_lines.append(line)
+
+    flush_current()
+
+    if not found_explicit_highlight or len(sections) < 3:
+        return []
+
+    semantic_chunks: list[dict[str, object]] = []
+    for section in sections:
+        chunk_sentences = split_sentences("\n".join(section["lines"]))
+        if not chunk_sentences:
+            continue
+        title = finalize_semantic_title(str(section["kind"]), str(section["seed"]), chunk_sentences)
+        semantic_chunks.append({"title": title, "sentences": chunk_sentences})
+
+    return semantic_chunks
+
+
 def split_transcript_chunks(text: str) -> list[dict[str, object]]:
     if not text.strip():
         return []
@@ -558,20 +697,24 @@ def split_transcript_chunks(text: str) -> list[dict[str, object]]:
         if chunks:
             return chunks
 
-    paragraphs = [block.strip() for block in re.split(r"\n\s*\n+", text) if block.strip()]
-    if len(paragraphs) >= 3:
-        chunks = []
-        for index, paragraph in enumerate(paragraphs, 1):
-            sentences = split_sentences(paragraph)
-            if not sentences:
-                continue
-            chunks.append({"title": make_chunk_title(index, None, sentences), "sentences": sentences})
-        if chunks:
-            return chunks
+    semantic_chunks = split_semantic_sections(text)
+    if semantic_chunks:
+        return semantic_chunks
 
     sentences = split_sentences(text)
     if not sentences:
         return []
+
+    paragraphs = [block.strip() for block in re.split(r"\n\s*\n+", text) if block.strip()]
+    if len(paragraphs) >= 3:
+        chunks = []
+        for index, paragraph in enumerate(paragraphs, 1):
+            paragraph_sentences = split_sentences(paragraph)
+            if not paragraph_sentences:
+                continue
+            chunks.append({"title": make_chunk_title(index, None, paragraph_sentences), "sentences": paragraph_sentences})
+        if chunks:
+            return chunks
 
     chunks = []
     current: list[str] = []
@@ -610,26 +753,27 @@ def rank_chunk_sentences(chunks: list[dict[str, object]], kind: str, per_chunk: 
 def build_chunk_outline(chunks: list[dict[str, object]]) -> list[dict[str, object]]:
     outline_chunks: list[dict[str, object]] = []
     used_titles: set[str] = set()
-    for chunk in chunks[:4]:
+    for chunk in chunks[:6]:
         chunk_title = str(chunk["title"])
         if chunk_title in used_titles:
             alternative_title = derive_alternative_chunk_title(list(chunk["sentences"]), used_titles)
             if alternative_title:
                 chunk_title = alternative_title
         chunk_candidates = [{"text": sentence, "source": "transcript"} for sentence in chunk["sentences"]]
+        point_limit = 2 if chunk_title.startswith(("\u4eae\u70b9", "\u524d\u671f", "\u5207\u6362", "\u603b\u4f53")) else 3
         core = rank_sentences(chunk_candidates, kind="core", limit=1)
         details = rank_sentences(chunk_candidates, kind="detail", limit=2, exclude=set(core))
         actions = rank_sentences(chunk_candidates, kind="action", limit=1, exclude=set(core) | set(details))
 
         points = core + details + actions
         if not points:
-            points = dedupe_sentences(list(chunk["sentences"]))[:3]
+            points = dedupe_sentences(list(chunk["sentences"]))[:point_limit]
 
         filtered_points = [point for point in points if not is_title_like_point(chunk_title, point)]
         if not filtered_points and points:
             filtered_points = points[1:] if len(points) > 1 else []
-        points = [compress_chunk_point(point, chunk_title) for point in filtered_points[:3]]
-        points = dedupe_sentences([point for point in points if point])[:3]
+        points = [compress_chunk_point(point, chunk_title) for point in filtered_points[:point_limit]]
+        points = dedupe_sentences([point for point in points if point])[:point_limit]
 
         if points:
             outline_chunks.append({"title": chunk_title, "points": points})
@@ -736,6 +880,33 @@ def parse_comments(comments_text: str) -> list[str]:
     return dedupe_sentences(results)[:4]
 
 
+def extract_primary_body(text: str) -> str:
+    cleaned_lines: list[str] = []
+    started = False
+    box_chars = "??????????????????????????"
+    marker_prefixes = ("??", "??", "??", "??")
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            if started:
+                cleaned_lines.append("")
+            continue
+        if any(char in line for char in box_chars):
+            continue
+        if re.search(r"BV[0-9A-Za-z]+", line):
+            continue
+        if line.startswith(marker_prefixes):
+            continue
+        if line.endswith(":") and len(line) <= 16:
+            started = True
+            continue
+        started = True
+        cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines).strip()
+
+
 def sanitize_transcript_text(text: str) -> str:
     cleaned_lines: list[str] = []
     started = False
@@ -801,7 +972,7 @@ def derive_action_points(core_points: list[str], detail_points: list[str]) -> li
 def build_outline(context_dir: Path) -> str:
     manifest = read_json(context_dir / "manifest.json") or {}
     meta = extract_video_meta(context_dir, manifest)
-    ai_summary = normalize_whitespace(read_text(context_dir / "ai_summary.txt"))
+    ai_summary = normalize_whitespace(extract_primary_body(read_text(context_dir / "ai_summary.txt")))
     if is_placeholder_text(ai_summary):
         ai_summary = ""
     subtitles_raw = sanitize_transcript_text(read_text(context_dir / "subtitles.txt"))

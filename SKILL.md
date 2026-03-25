@@ -1,84 +1,106 @@
 ---
 name: bili-mindmap
-description: Turn a Bilibili video URL or BV number into a summarized XMind mind map. Use when the user wants to collect subtitles, comments, AI summary, and transcript fallback, then generate structured notes, 内容梳理, or 思维导图 for a Bilibili video.
+description: Turn a Bilibili video URL or BV number into a human-like XMind mind map. Use when the user wants to collect subtitles, comments, AI summary, and transcript fallback, then generate structured notes or mind maps for a Bilibili video.
 metadata:
-  version: 0.2.0
+  version: 0.2.1
   clawdbot:
-    emoji: "🧠"
+    emoji: ":brain:"
 ---
 
 # Bili Mindmap
 
-把 B 站视频链接整理成可在 XMind 中打开的思维导图。
+Turn a Bilibili video into a mind map that feels closer to something a human actually organized.
 
-## 先决条件
+## Recommended Flow
 
-- 确认 `bili` 已安装且可用。
-- 需要音频回退时，确认 `bilibili-cli[audio]` 已安装。
-- Windows 上走云端 ASR 时，确认阿里云配置文件已存在。
-- Linux/macOS 上若优先走本地 ASR，确认本地 Parakeet 接口已启动。
+- Python scripts collect video details, subtitles, AI summary, comments, and ASR fallback when needed.
+- The host platform's injected model reads the prepared context and writes a high-quality `outline.md`.
+- Python renders `outline.md` into an `.xmind` file.
 
-## 关键约束
+## Preconditions
 
-- 优先使用字幕；只有字幕不可用时才走音频转写。
-- 登录检查是强依赖：先运行 `bili status`，必要时再运行 `bili login`。
-- Windows 优先使用内置阿里云 ASR。
-- Linux/macOS 优先使用本地 Parakeet；失败时回退到内置阿里云 ASR。
-- 导图中的主干内容优先来自字幕或 ASR，评论只作为补充。
+- `bili` must be installed and available.
+- If audio fallback is needed, `bilibili-cli[audio]` should be installed.
+- If cloud ASR is used on Windows, the Aliyun config file should already exist.
+- If local ASR is preferred on Linux or macOS, make sure the Parakeet endpoint is running.
 
-## 标准流程
+## Core Constraints
 
-1. 解析用户输入，接受完整视频链接或 `BV` 号。
-2. 运行 `bili status` 检查登录状态。
-3. 需要时运行 `bili login` 并等待用户扫码。
-4. 运行 `python scripts/prepare_bili_context.py --source <视频链接或BV号> --login-if-needed --transcribe-if-needed`。
-5. 阅读输出目录中的 `context.md`、`manifest.json` 和相关文本文件。
-6. 运行 `python scripts/generate_outline.py --context-dir <输出目录> --output <输出目录/outline.md>`。
-7. 运行 `python scripts/render_xmind.py --outline <outline.md> --output <输出.xmind>`。
-8. 向用户说明 `.xmind` 路径，并标明主要内容来源是字幕、AI 总结、评论还是 ASR。
+- Prefer subtitles first. Only fall back to ASR when subtitles are unavailable.
+- Login check is mandatory: run `bili status` before `bili login`.
+- The main way to produce `outline.md` should be the host model, not the local rule-based script.
+- The main structure should come from subtitles or ASR. Comments and the site AI summary are supplemental only.
+- Do not mechanically copy spoken transcript text. Merge themes, compress phrasing, and organize by logic.
+- If information is weak or incomplete, mark it explicitly instead of inventing facts.
 
-## 一键流水线
+## Main Workflow
+
+1. Accept either a full video URL or a `BV` id.
+2. Run `bili status` to check login.
+3. If needed, run `bili login` and wait for the user to scan.
+4. Run `python scripts/prepare_bili_context.py --source <video-url-or-bv> --login-if-needed --transcribe-if-needed`.
+5. Read the generated files: `context.md`, `host_outline_prompt.md`, `manifest.json`, `video_details.json`, `subtitles.txt`, `ai_summary.txt`, and `comments.txt`.
+6. Feed `host_outline_prompt.md` to the host platform model and let it write `outline.md`. Only use `scripts/generate_outline.py` when the host model path is unavailable.
+7. Run `python scripts/render_xmind.py --outline <output-dir/outline.md> --output <output-dir/result.xmind>`.
+8. Tell the user where the `.xmind` file was written and which sources were most important.
+
+## One-Command Workflow
+
+`run_bili_mindmap.py` now supports two workflows:
+
+- `--workflow host`: recommended quality path. Collects context first, then waits for a host-generated `outline.md`.
+- `--workflow local`: fallback path. Uses `scripts/generate_outline.py` locally.
+
+Recommended command:
 
 ```bash
-python scripts/run_bili_mindmap.py \
-  --source "BV1ABcsztEcY" \
-  --output-dir output/BV1ABcsztEcY \
-  --login-if-needed \
-  --transcribe-if-needed
+python scripts/run_bili_mindmap.py   --source "BV1ABcsztEcY"   --output-dir output/BV1ABcsztEcY   --workflow host   --login-if-needed   --transcribe-if-needed
 ```
 
-## 采集策略
+On the first run, if `outline.md` does not exist yet, the script will stop after context preparation and print:
 
-按下面顺序收集信息：
+- the `context.md` path
+- the `host_outline_prompt.md` path
+- the expected `outline.md` path
 
-1. `bili video <source>`：视频详情
-2. `bili video <source> --subtitle`：字幕
-3. `bili video <source> --ai`：站内 AI 总结
-4. `bili video <source> --comments`：热门评论
-5. 若字幕不可用：
-   - `bili audio <source> -o <输出目录/audio>` 提取音频
-   - Windows：优先内置阿里云 ASR
-   - Linux/macOS：优先本地 Parakeet，失败后回退到内置阿里云 ASR
+After the host model writes `outline.md`, run the same command again and it will render the `.xmind` file.
 
-## 输出要求
+## Fallback Workflow
 
-- 用视频标题作为中心主题。
-- 一级分支优先包含：`视频概览`、`内容脉络`、`核心内容`、`关键细节`、`评论反馈`、`总结 / 行动项`。
-- 字幕 / ASR 是主干来源，评论与 AI 总结只做补充。
-- 不要臆造内容；信息缺失时要明确说明。
+When the host model cannot be used, fall back to the local outline generator:
 
-## 关键文件
+```bash
+python scripts/generate_outline.py   --context-dir <output-dir>   --output <output-dir/outline.md>
+```
 
-- `scripts/prepare_bili_context.py`：登录检查、内容抓取、ASR 回退
-- `scripts/generate_outline.py`：大纲生成
-- `scripts/render_xmind.py`：纯 Python XMind 导出
-- `scripts/run_bili_mindmap.py`：总控脚本
-- `references/mindmap-outline-template.md`：大纲模板
-- `vendor/aliyun_asr/`：内置阿里云文件转写实现
+This is only a fallback. It is usually lower quality than the host-model result.
 
-## 常见故障
+## Collection Strategy
 
-- 如果 `bili` 不存在：先安装 `bilibili-cli`
-- 如果字幕不可用且音频提取失败：检查 `bilibili-cli[audio]`、FFmpeg / PyAV 依赖
-- 如果阿里云 ASR 不工作：检查 `ALIYUN_ASR_CONFIG` 或默认配置文件路径
-- 如果 Linux/macOS 上本地 Parakeet 不可达：自动尝试阿里云 ASR，并在 `manifest.json` 中记录回退
+Collect information in this order:
+
+1. `bili video <source>` for video details
+2. `bili video <source> --subtitle` for subtitles
+3. `bili video <source> --ai` for the site AI summary
+4. `bili video <source> --comments` for hot comments
+5. If subtitles are unavailable:
+   - `bili audio <source> -o <output-dir/audio>` to extract audio
+   - `auto` mode falls back in `moonshine -> parakeet -> aliyun` order
+
+## Output Requirements
+
+- Use the video title as the root topic.
+- Keep subtitles or ASR as the main evidence.
+- Prefer abstraction and synthesis over transcript copying.
+- Mark uncertainty explicitly.
+- The final artifacts should include both `outline.md` and `.xmind`.
+
+## Important Files
+
+- `scripts/prepare_bili_context.py`: login checks, content collection, ASR fallback, and generation of `context.md` plus `host_outline_prompt.md`
+- `scripts/generate_outline.py`: local fallback outline generator
+- `scripts/render_xmind.py`: pure Python XMind renderer
+- `scripts/run_bili_mindmap.py`: one-command entry point with `host` and `local` workflows
+- `references/mindmap-outline-template.md`: structure template for the final outline
+- `references/host-llm-outline-spec.md`: quality and behavior rules for the host model path
+- `vendor/aliyun_asr/`: bundled Aliyun file transcription implementation

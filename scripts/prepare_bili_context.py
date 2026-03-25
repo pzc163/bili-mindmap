@@ -12,8 +12,10 @@ import re
 import shutil
 import subprocess
 import sys
+import textwrap
 import uuid
 from pathlib import Path
+from typing import Optional
 from urllib import error, request
 
 # Moonshine ASR integration
@@ -33,21 +35,32 @@ def transcribe_file_moonshine(audio_file: Path) -> str:
     return asr.speech_to_text(str(audio_file))
 
 
+
 BV_PATTERN = re.compile(r"(BV[0-9A-Za-z]+)", re.IGNORECASE)
 EMPTY_HINTS = (
     "no subtitle",
     "subtitle not found",
-    "未找到字幕",
-    "无字幕",
+    "获取字幕失败",
     "没有字幕",
-    "暂无字幕",
-    "暂无 ai 总结",
-    "该视频暂无 ai 总结",
-    "无 ai 总结",
-    "⚠️",
+    "无字幕",
+    "获取 ai 总结失败",
+    "获取ai总结失败",
+    "账号未登录",
+    "未登录",
+    "cannot connect to host",
+    "credential 类未提供 sessdata",
+    "接口返回错误代码",
+    "ssl:default",
     "failed",
     "error",
 )
+
+TABLE_ROW_PATTERN = re.compile(r"^\s*[\u2502|]\s*(.+?)\s*[\u2502|]\s*(.+?)\s*[\u2502|]\s*$")
+COMMENT_AUTHOR_PATTERN = re.compile(r"^\s*(.+?)\s*\(\s*(?:[^\d)]*\s*)?(\d+)\s*\)\s*$")
+BOX_DRAWING_ONLY_PATTERN = re.compile(r"^[\s\u250c\u2510\u2514\u2518\u251c\u2524\u252c\u2534\u253c\u2500\u2502|]+$")
+
+
+SEGMENT_HEADING_PATTERN = re.compile(r"^#{1,6}\s+seg[_-]?\d+\.(?:wav|mp3|m4a|flac|aac)\s*$", re.IGNORECASE)
 
 
 def parse_args() -> argparse.Namespace:
@@ -78,16 +91,24 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--asr-provider",
-        choices=["auto", "parakeet", "aliyun"],
+        choices=["auto", "moonshine", "parakeet", "aliyun"],
         default="auto",
-        help="ASR provider selection. `auto` chooses by operating system.",
+        help="ASR provider selection. `auto` tries moonshine, parakeet, then aliyun.",
     )
     return parser.parse_args()
 
 
+def make_utf8_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.setdefault("PYTHONUTF8", "1")
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONLEGACYWINDOWSSTDIO", "1")
+    return env
+
+
 def run_command(command: list[str], interactive: bool = False) -> subprocess.CompletedProcess[str]:
     if interactive:
-        return subprocess.run(command, check=False)
+        return subprocess.run(command, check=False, env=make_utf8_env())
     return subprocess.run(
         command,
         check=False,
@@ -95,6 +116,7 @@ def run_command(command: list[str], interactive: bool = False) -> subprocess.Com
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=make_utf8_env(),
     )
 
 
@@ -162,15 +184,33 @@ def command_text(result: subprocess.CompletedProcess[str]) -> str:
     return stdout or stderr
 
 
+def normalize_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def parse_box_table(text: str) -> dict[str, str]:
+    rows: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        match = TABLE_ROW_PATTERN.match(raw_line)
+        if not match:
+            continue
+        key = normalize_whitespace(match.group(1)).rstrip(":?")
+        value = normalize_whitespace(match.group(2))
+        if key and value:
+            rows[key] = value
+    return rows
+
+
+
 def extract_primary_body(text: str) -> str:
     stripped = text.strip()
     if not stripped:
         return ""
 
     marker_patterns = (
-        r"字幕内容:\s*",
-        r"AI 总结:\s*",
-        r"热门评论:\s*",
+        r"(?:\U0001f4ac\s*)?\u70ed\u95e8\u8bc4\u8bba:\s*",
+        r"(?:\U0001f916\s*)?AI \u603b\u7ed3:\s*",
+        r"(?:\U0001f4dd\s*)?\u5b57\u5e55\u5185\u5bb9:\s*",
     )
 
     for pattern in marker_patterns:
@@ -185,8 +225,120 @@ def looks_like_useful_text(text: str) -> bool:
     stripped = extract_primary_body(text)
     if len(stripped) < 20:
         return False
+
     lowered = stripped.lower()
+    if stripped.startswith(("\u26a0", "[stderr]", "{")):
+        return False
+
     return not any(hint in lowered for hint in EMPTY_HINTS)
+
+
+def format_video_details(text: str) -> str:
+    rows = parse_box_table(text)
+    if not rows:
+        return extract_primary_body(text)
+
+    ordered_keys = ["\u6807\u9898", "BV\u53f7", "UP\u4e3b", "\u65f6\u957f", "\u53d1\u5e03\u65f6\u95f4", "\u64ad\u653e", "\u5f39\u5e55", "\u70b9\u8d5e", "\u6295\u5e01", "\u6536\u85cf", "\u5206\u4eab", "\u94fe\u63a5"]
+    rendered: list[str] = []
+    for key in ordered_keys:
+        value = rows.get(key)
+        if value:
+            rendered.append(f"- {key}: {value}")
+
+    for key, value in rows.items():
+        if key not in ordered_keys:
+            rendered.append(f"- {key}: {value}")
+
+    return "\n".join(rendered)
+
+
+def normalize_transcript_text(text: str) -> str:
+    body = extract_primary_body(text)
+    if not body:
+        return ""
+
+    paragraphs: list[str] = []
+    current: list[str] = []
+    for raw_line in body.splitlines():
+        line = normalize_whitespace(raw_line)
+        if not line:
+            continue
+        if SEGMENT_HEADING_PATTERN.match(line):
+            if current:
+                paragraphs.append(" ".join(current))
+                current = []
+            continue
+        current.append(line)
+
+    if current:
+        paragraphs.append(" ".join(current))
+
+    return "\n\n".join(paragraphs)
+
+
+def format_hot_comments(text: str) -> str:
+    body = extract_primary_body(text)
+    if not body or not looks_like_useful_text(text):
+        return ""
+
+    lines = [line.strip() for line in body.splitlines()]
+    rendered: list[str] = []
+    index = 0
+    skip_prefixes = ("\U0001f4fa", "\U0001f4ac", "\U0001f916", "\U0001f4dd", "\u26a0")
+
+    while index < len(lines):
+        line = lines[index]
+        if not line or BOX_DRAWING_ONLY_PATTERN.match(line) or line.startswith(skip_prefixes):
+            index += 1
+            continue
+
+        match = COMMENT_AUTHOR_PATTERN.match(line)
+        if match:
+            author, likes = match.groups()
+            fragments: list[str] = []
+            lookahead = index + 1
+            while lookahead < len(lines):
+                candidate = lines[lookahead].strip()
+                if not candidate:
+                    if fragments:
+                        break
+                    lookahead += 1
+                    continue
+                if BOX_DRAWING_ONLY_PATTERN.match(candidate) or candidate.startswith(skip_prefixes):
+                    break
+                if COMMENT_AUTHOR_PATTERN.match(candidate):
+                    break
+                fragments.append(normalize_whitespace(candidate))
+                lookahead += 1
+
+            comment = " ".join(fragments).strip()
+            rendered.append(
+                f"- {author} ({likes}\u8d5e): {comment}" if comment else f"- {author} ({likes}\u8d5e)"
+            )
+            index = lookahead
+            continue
+
+        rendered.append(f"- {normalize_whitespace(line)}")
+        index += 1
+
+    return "\n".join(rendered) if rendered else body
+
+
+def extract_video_title_from_details_text(text: str) -> str | None:
+    rows = parse_box_table(text)
+    title = rows.get("\u6807\u9898")
+    if title:
+        return title
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("\U0001f4fa"):
+            candidate = line.lstrip("\U0001f4fa").strip()
+            if candidate:
+                return candidate
+    return None
 
 
 def ensure_login(login_if_needed: bool, output_dir: Path) -> dict:
@@ -431,8 +583,14 @@ def build_context(output_dir: Path, source: str, manifest: dict) -> None:
     comments = read_text_if_exists(output_dir / "comments.txt")
     transcript = read_text_if_exists(output_dir / "transcript.txt")
 
-    preferred_transcript = subtitles if looks_like_useful_text(subtitles) else transcript
-    transcript_source = "subtitles" if preferred_transcript == subtitles and subtitles else "asr"
+    cleaned_details = format_video_details(details)
+    cleaned_subtitles = normalize_transcript_text(subtitles)
+    cleaned_transcript = normalize_transcript_text(transcript)
+    cleaned_ai_summary = extract_primary_body(ai_summary) if looks_like_useful_text(ai_summary) else ""
+    cleaned_comments = format_hot_comments(comments)
+
+    preferred_transcript = cleaned_subtitles if looks_like_useful_text(subtitles) else cleaned_transcript
+    transcript_source = "subtitles" if preferred_transcript == cleaned_subtitles and cleaned_subtitles else "asr"
 
     sections = [
         "# Bilibili Mindmap Context",
@@ -453,21 +611,22 @@ def build_context(output_dir: Path, source: str, manifest: dict) -> None:
         ),
         "",
         "## Video Details",
-        details or "(missing)",
+        cleaned_details or "(missing)",
         "",
         "## Preferred Transcript",
         preferred_transcript or "(missing)",
         "",
         "## AI Summary",
-        ai_summary or "(missing)",
+        cleaned_ai_summary or "(missing)",
         "",
         "## Hot Comments",
-        comments or "(missing)",
+        cleaned_comments or "(missing)",
         "",
         "## Outline Reminder",
         "- Use the video title as the root topic.",
         "- Prefer transcript evidence over comments and AI summary.",
         "- Treat comments as supplemental viewpoints.",
+        "- Convert spoken language into abstract topic labels before writing the outline.",
         "- Mark uncertain or conflicting points explicitly.",
     ]
     save_text(output_dir / "context.md", "\n".join(sections))
@@ -486,6 +645,102 @@ def load_json_if_exists(path: Path) -> dict | list | None:
         return json.loads(path.read_text(encoding="utf-8", errors="replace"))
     except json.JSONDecodeError:
         return None
+
+
+def extract_video_title(output_dir: Path) -> str | None:
+    payload = load_json_if_exists(output_dir / "video_details.json")
+    if isinstance(payload, dict):
+        title = str(payload.get("title") or "").strip()
+        if title:
+            return title
+
+    details_text = read_text_if_exists(output_dir / "video_details.txt")
+    return extract_video_title_from_details_text(details_text)
+
+
+
+def build_host_outline_prompt(root_dir: Path, output_dir: Path, source: str, manifest: dict) -> None:
+    context_path = output_dir / "context.md"
+    outline_path = output_dir / "outline.md"
+    template_path = root_dir / "references" / "mindmap-outline-template.md"
+    spec_path = root_dir / "references" / "host-llm-outline-spec.md"
+
+    video_title = extract_video_title(output_dir) or "Untitled Video"
+    template_text = read_text_if_exists(template_path) or "(missing)"
+    spec_text = read_text_if_exists(spec_path) or "(missing)"
+
+    files = manifest.get("files") if isinstance(manifest.get("files"), dict) else {}
+    subtitle_info = files.get("subtitles") if isinstance(files, dict) else {}
+    ai_info = files.get("ai_summary") if isinstance(files, dict) else {}
+    comments_info = files.get("comments") if isinstance(files, dict) else {}
+    fallback_info = manifest.get("fallback") if isinstance(manifest.get("fallback"), dict) else {}
+
+    retrieval_summary = {
+        "source": source,
+        "video_title": video_title,
+        "subtitle_available": bool(isinstance(subtitle_info, dict) and subtitle_info.get("useful")),
+        "ai_summary_available": bool(isinstance(ai_info, dict) and ai_info.get("useful")),
+        "comments_available": bool(isinstance(comments_info, dict) and comments_info.get("useful")),
+        "asr_used": bool(fallback_info.get("transcript_file")),
+        "asr_providers_used": fallback_info.get("providers_used") or [],
+    }
+
+    prompt = textwrap.dedent(
+        f"""
+        # Host LLM Outline Task
+
+        Please use the materials in this directory to write a human-organized Chinese mind map Markdown and save it to `{outline_path}`.
+
+        Read these files first:
+
+        - `context.md`: `{context_path}`
+        - Outline spec: `{spec_path}`
+        - Outline template: `{template_path}`
+
+        ## Material Summary
+
+        ```json
+        {json.dumps(retrieval_summary, ensure_ascii=False, indent=2)}
+        ```
+
+        ## Required Workflow
+
+        1. Identify the video's central thesis before writing.
+        2. Group the full source into 3-6 logical modules instead of slicing by timestamp or ASR segment boundaries.
+        3. First-level branches under `内容脉络` must be abstract topic labels, not copied spoken lines.
+        4. `核心内容` should capture cross-section conclusions instead of event-by-event notes.
+        5. `关键细节` should preserve mechanisms, cases, data, contrasts, and caveats.
+        6. `评论反馈` is supplementary only and must not replace the main structure.
+
+        ## Failure Modes To Avoid
+
+        - Bad branch title: directly copying a raw transcript sentence.
+        - Good branch title: `危机升级已经从相互试探转向最后通牒`.
+        - Bad branch title: splitting every moment on the timeline into a sibling branch.
+        - Good branch title: `航运咽喉与能源价格成为冲突外溢的核心变量`.
+        - Merge nearby spans when they describe the same idea, even if they come from different ASR chunks.
+        - If a title still sounds spoken instead of organized, rewrite it before finalizing.
+
+        ## Self-Check Before Finalizing
+
+        - Is `内容脉络` organized by logic rather than transcript order?
+        - Do branch titles look like topic labels or compressed judgments instead of paraphrased speech?
+        - Does `核心内容` summarize across sections instead of repeating branch headings?
+        - Does `关键细节` preserve evidence, mechanisms, examples, numbers, or contrasts?
+        - If the material is mostly ASR, are uncertain points described conservatively?
+        - Output clean Markdown only, with no extra explanation.
+
+        ## Outline Spec
+
+        {spec_text}
+
+        ## Outline Template
+
+        {template_text}
+        """
+    ).strip()
+
+    save_text(output_dir / "host_outline_prompt.md", prompt)
 
 
 def main() -> int:
@@ -538,6 +793,7 @@ def main() -> int:
         manifest["warnings"].append("Subtitle unavailable and ASR fallback not enabled.")
 
     build_context(output_dir, args.source, manifest)
+    build_host_outline_prompt(root_dir, output_dir, args.source, manifest)
     (output_dir / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
